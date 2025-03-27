@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Superstore Analytics Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f7fa;
+            color: #333;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+        h1 {
+            color: #2c3e50;
+            margin: 0;
+        }
+        .upload-container {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+        }
+        .chart-container {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .chart-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-top: 0;
+            margin-bottom: 10px;
+            color: #2c3e50;
+        }
+        .full-width {
+            grid-column: 1 / -1;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        select, button {
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            background: white;
+            font-size: 14px;
+        }
+        button {
+            background: #3498db;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: #2980b9;
+        }
+        #file-info {
+            margin-left: 10px;
+            font-size: 14px;
+            color: #7f8c8d;
+        }
+        .error {
+            color: #e74c3c;
+            padding: 10px;
+            background: #fadbd8;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Superstore Analytics Dashboard</h1>
+        <div>
+            <span id="file-info">No file selected</span>
+            <button id="sample-data-btn">Load Sample Data</button>
+        </div>
+    </div>
+
+    <div class="upload-container">
+        <input type="file" id="file-input" accept=".json" />
+        <div id="upload-error" class="error" style="display: none;"></div>
+        <div class="controls">
+            <select id="time-period">
+                <option value="monthly">Monthly</option>
+                <option value="quarterly">Quarterly</option>
+                <option value="yearly">Yearly</option>
+            </select>
+            <select id="region-filter">
+                <option value="all">All Regions</option>
+            </select>
+            <button id="apply-filters">Apply Filters</button>
+        </div>
+    </div>
+
+    <div class="dashboard">
+        <div class="chart-container full-width" id="trend-chart"></div>
+        <div class="chart-container" id="sales-by-state"></div>
+        <div class="chart-container" id="profit-by-state"></div>
+        <div class="chart-container" id="top-states-sales"></div>
+        <div class="chart-container" id="top-states-profit"></div>
+        <div class="chart-container" id="sales-profit-shipmode"></div>
+        <div class="chart-container" id="category-analysis"></div>
+        <div class="chart-container" id="discount-profit-correlation"></div>
+        <div class="chart-container" id="customer-segment"></div>
+    </div>
+
+    <script>
+        // State abbreviations mapping
+        const stateAbbreviations = {
+            'alabama': 'AL', 'alaska': 'AK', 'arizona': 'AZ', 'arkansas': 'AR',
+            'california': 'CA', 'colorado': 'CO', 'connecticut': 'CT', 'delaware': 'DE',
+            'florida': 'FL', 'georgia': 'GA', 'hawaii': 'HI', 'idaho': 'ID',
+            'illinois': 'IL', 'indiana': 'IN', 'iowa': 'IA', 'kansas': 'KS',
+            'kentucky': 'KY', 'louisiana': 'LA', 'maine': 'ME', 'maryland': 'MD',
+            'massachusetts': 'MA', 'michigan': 'MI', 'minnesota': 'MN', 'mississippi': 'MS',
+            'missouri': 'MO', 'montana': 'MT', 'nebraska': 'NE', 'nevada': 'NV',
+            'new hampshire': 'NH', 'new jersey': 'NJ', 'new mexico': 'NM', 'new york': 'NY',
+            'north carolina': 'NC', 'north dakota': 'ND', 'ohio': 'OH', 'oklahoma': 'OK',
+            'oregon': 'OR', 'pennsylvania': 'PA', 'rhode island': 'RI', 'south carolina': 'SC',
+            'south dakota': 'SD', 'tennessee': 'TN', 'texas': 'TX', 'utah': 'UT',
+            'vermont': 'VT', 'virginia': 'VA', 'washington': 'WA', 'west virginia': 'WV',
+            'wisconsin': 'WI', 'wyoming': 'WY'
+        };
+
+        // Global variable to store the data
+        let superstoreData = [];
+        
+        // DOM elements
+        const fileInput = document.getElementById('file-input');
+        const sampleDataBtn = document.getElementById('sample-data-btn');
+        const fileInfo = document.getElementById('file-info');
+        const timePeriodSelect = document.getElementById('time-period');
+        const regionFilterSelect = document.getElementById('region-filter');
+        const applyFiltersBtn = document.getElementById('apply-filters');
+        const uploadError = document.getElementById('upload-error');
+        
+        // Chart containers
+        const trendChart = document.getElementById('trend-chart');
+        const salesByState = document.getElementById('sales-by-state');
+        const profitByState = document.getElementById('profit-by-state');
+        const topStatesSales = document.getElementById('top-states-sales');
+        const topStatesProfit = document.getElementById('top-states-profit');
+        const salesProfitShipmode = document.getElementById('sales-profit-shipmode');
+        const categoryAnalysis = document.getElementById('category-analysis');
+        const discountProfitCorrelation = document.getElementById('discount-profit-correlation');
+        const customerSegment = document.getElementById('customer-segment');
+        
+        // Event listeners
+        fileInput.addEventListener('change', handleFileUpload);
+        sampleDataBtn.addEventListener('click', loadSampleData);
+        applyFiltersBtn.addEventListener('click', updateDashboard);
+        
+        // Helper function to get state abbreviation
+        function getStateAbbreviation(stateName) {
+            if (!stateName) return 'Unknown';
+            if (stateName.length === 2 && Object.values(stateAbbreviations).includes(stateName.toUpperCase())) {
+                return stateName.toUpperCase();
+            }
+            return stateAbbreviations[stateName.toLowerCase()] || stateName;
+        }
+        
+        // Helper function to parse currency strings to numbers
+        function parseCurrency(currencyStr) {
+            if (typeof currencyStr === 'number') return currencyStr;
+            return parseFloat(currencyStr.toString().replace(/[^0-9.-]+/g, '')) || 0;
+        }
+        
+        // Format date for display
+        function formatDate(date) {
+            const options = { year: 'numeric', month: 'short' };
+            return date.toLocaleDateString('en-US', options);
+        }
+        
+        // Process the data after loading
+        function processData(data) {
+            if (!Array.isArray(data)) {
+                console.error("Data is not an array:", data);
+                return [];
+            }
+            
+            return data.map(item => {
+                // Safely parse sales (handles both string "$16,448.000" and number 16448)
+                const sales = parseCurrency(item.Sales || item.sales || 0);
+                
+                // Parse date (handles multiple formats)
+                let orderDate;
+                const dateFields = ['Order Date', 'OrderDate', 'Date', 'order_date'];
+                for (const field of dateFields) {
+                    if (item[field]) {
+                        orderDate = new Date(item[field]);
+                        if (!isNaN(orderDate.getTime())) break;
+                    }
+                }
+                if (isNaN(orderDate?.getTime())) orderDate = new Date(); // Fallback to today
+                
+                return {
+                    ...item,
+                    Sales: sales,
+                    Profit: parseCurrency(item.Profit || item.profit || 0),
+                    Discount: parseFloat(item.Discount || item.discount || 0),
+                    State: getStateAbbreviation(item.State || item.state || 'Unknown'),
+                    Region: item.Region || item.region || 'Unknown',
+                    Category: item.Category || item.category || 'Unknown',
+                    'Sub-Category': item['Sub-Category'] || item.subcategory || 'Unknown',
+                    'Ship Mode': item['Ship Mode'] || item.ship_mode || 'Unknown',
+                    Segment: item.Segment || item.segment || 'Unknown',
+                    OrderDate: orderDate,
+                    formattedDate: formatDate(orderDate),
+                    month: orderDate.getMonth() + 1,
+                    year: orderDate.getFullYear(),
+                    quarter: Math.floor((orderDate.getMonth() + 3) / 3)
+                };
+            });
+        }
+        
+        // Handle file upload
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            fileInfo.textContent = file.name;
+            uploadError.style.display = 'none';
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const jsonData = JSON.parse(e.target.result);
+                    console.log("Raw data sample:", jsonData.slice(0, 2));
+                    
+                    superstoreData = processData(Array.isArray(jsonData) ? jsonData : [jsonData]);
+                    console.log("Processed data sample:", superstoreData.slice(0, 2));
+                    
+                    if (superstoreData.length === 0) {
+                        throw new Error("No valid data found after processing");
+                    }
+                    
+                    updateRegionFilter();
+                    updateDashboard();
+                } catch (error) {
+                    console.error("Error processing file:", error);
+                    uploadError.textContent = `Error: ${error.message}`;
+                    uploadError.style.display = 'block';
+                }
+            };
+            reader.onerror = function() {
+                uploadError.textContent = "Error reading file";
+                uploadError.style.display = 'block';
+            };
+            reader.readAsText(file);
+        }
+        
+        // Load sample data
+        function loadSampleData() {
+            fetch('https://raw.githubusercontent.com/plotly/datasets/master/superstore-sales.json')
+                .then(response => {
+                    if (!response.ok) throw new Error("Network response was not ok");
+                    return response.json();
+                })
+                .then(data => {
+                    superstoreData = processData(data);
+                    fileInfo.textContent = "Using sample data";
+                    uploadError.style.display = 'none';
+                    updateRegionFilter();
+                    updateDashboard();
+                })
+                .catch(error => {
+                    console.error("Error loading sample data:", error);
+                    uploadError.textContent = `Error loading sample data: ${error.message}`;
+                    uploadError.style.display = 'block';
+                });
+        }
+        
+        // Update region filter dropdown
+        function updateRegionFilter() {
+            if (!superstoreData.length) return;
+            
+            const regions = [...new Set(superstoreData.map(item => item.Region))].filter(Boolean);
+            regionFilterSelect.innerHTML = '<option value="all">All Regions</option>';
+            
+            regions.forEach(region => {
+                const option = document.createElement('option');
+                option.value = region;
+                option.textContent = region;
+                regionFilterSelect.appendChild(option);
+            });
+        }
+        
+        // Filter data based on selected filters
+        function getFilteredData() {
+            let filteredData = [...superstoreData];
+            const region = regionFilterSelect.value;
+            
+            if (region !== 'all') {
+                filteredData = filteredData.filter(item => item.Region === region);
+            }
+            
+            return filteredData;
+        }
+        
+        // Update all charts
+        function updateDashboard() {
+            const filteredData = getFilteredData();
+            const timePeriod = timePeriodSelect.value;
+            
+            if (!filteredData.length) {
+                uploadError.textContent = 'No data available with current filters';
+                uploadError.style.display = 'block';
+                return;
+            }
+            
+            uploadError.style.display = 'none';
+            
+            try {
+                renderTrendChart(filteredData, timePeriod);
+                renderSalesByState(filteredData);
+                renderProfitByState(filteredData);
+                renderTopStatesSales(filteredData);
+                renderTopStatesProfit(filteredData);
+                renderSalesProfitShipmode(filteredData);
+                renderCategoryAnalysis(filteredData);
+                renderDiscountProfitCorrelation(filteredData);
+                renderCustomerSegment(filteredData);
+            } catch (error) {
+                console.error("Error rendering charts:", error);
+                uploadError.textContent = `Error rendering charts: ${error.message}`;
+                uploadError.style.display = 'block';
+            }
+        }
+        
+        // 1. Trend on Sales, Profit, and Discount
+        function renderTrendChart(data, timePeriod) {
+            const timeGroups = {};
+            
+            data.forEach(item => {
+                let timeKey;
+                if (timePeriod === 'monthly') {
+                    timeKey = `${item.year}-${item.month.toString().padStart(2, '0')}`;
+                } else if (timePeriod === 'quarterly') {
+                    timeKey = `Q${item.quarter} ${item.year}`;
+                } else {
+                    timeKey = item.year.toString();
+                }
+                
+                if (!timeGroups[timeKey]) {
+                    timeGroups[timeKey] = {
+                        sales: 0,
+                        profit: 0,
+                        discount: 0,
+                        count: 0
+                    };
+                }
+                
+                timeGroups[timeKey].sales += item.Sales;
+                timeGroups[timeKey].profit += item.Profit;
+                timeGroups[timeKey].discount += item.Discount;
+                timeGroups[timeKey].count += 1;
+            });
+            
+            const timeKeys = Object.keys(timeGroups).sort();
+            const salesData = timeKeys.map(key => timeGroups[key].sales);
+            const profitData = timeKeys.map(key => timeGroups[key].profit);
+            const avgDiscountData = timeKeys.map(key => timeGroups[key].discount / timeGroups[key].count);
+            
+            const trace1 = {
+                x: timeKeys,
+                y: salesData,
+                name: 'Sales',
+                yaxis: 'y1',
+                type: 'line',
+                line: { color: '#3498db', width: 3 }
+            };
+            
+            const trace2 = {
+                x: timeKeys,
+                y: profitData,
+                name: 'Profit',
+                yaxis: 'y2',
+                type: 'line',
+                line: { color: '#2ecc71', width: 3 }
+            };
+            
+            const trace3 = {
+                x: timeKeys,
+                y: avgDiscountData,
+                name: 'Avg Discount',
+                yaxis: 'y3',
+                type: 'bar',
+                marker: { color: '#e74c3c', opacity: 0.7 }
+            };
+            
+            const layout = {
+                title: `Trend Analysis (${timePeriod})`,
+                hovermode: 'closest',
+                margin: { t: 40, l: 50, r: 50, b: 100 },
+                xaxis: {
+                    tickangle: -45
+                },
+                yaxis: {
+                    title: 'Sales',
+                    titlefont: { color: '#3498db' },
+                    tickfont: { color: '#3498db' }
+                },
+                yaxis2: {
+                    title: 'Profit',
+                    titlefont: { color: '#2ecc71' },
+                    tickfont: { color: '#2ecc71' },
+                    overlaying: 'y',
+                    side: 'right'
+                },
+                yaxis3: {
+                    title: 'Avg Discount',
+                    titlefont: { color: '#e74c3c' },
+                    tickfont: { color: '#e74c3c' },
+                    overlaying: 'y',
+                    side: 'right',
+                    position: 0.95
+                },
+                legend: {
+                    orientation: 'h',
+                    y: 1.1
+                }
+            };
+            
+            Plotly.newPlot(trendChart, [trace1, trace2, trace3], layout);
+        }
+        
+        // 2. Sales by State (Fixed for US map)
+        function renderSalesByState(data) {
+            const stateSales = {};
+            
+            data.forEach(item => {
+                const stateAbbr = item.State; // Already converted in processData
+                if (!stateSales[stateAbbr]) {
+                    stateSales[stateAbbr] = 0;
+                }
+                stateSales[stateAbbr] += item.Sales;
+            });
+            
+            const states = Object.keys(stateSales).filter(abbr => abbr.length === 2); // Only 2-letter codes
+            const sales = states.map(state => stateSales[state]);
+            
+            // Calculate bounds for colorscale
+            const maxSales = Math.max(...sales);
+            const minSales = Math.min(...sales);
+            
+            const trace = {
+                type: 'choropleth',
+                locationmode: 'USA-states',
+                locations: states,
+                z: sales,
+                text: states.map(abbr => {
+                    const fullName = Object.entries(stateAbbreviations)
+                        .find(([name, code]) => code === abbr)?.[0];
+                    return fullName 
+                        ? `${abbr} - $${stateSales[abbr].toLocaleString()}` 
+                        : abbr;
+                }),
+                hoverinfo: 'text+location',
+                colorscale: [
+                    [0, 'rgb(242,240,247)'],
+                    [0.2, 'rgb(218,218,235)'],
+                    [0.4, 'rgb(188,189,220)'],
+                    [0.6, 'rgb(158,154,200)'],
+                    [0.8, 'rgb(117,107,177)'],
+                    [1, 'rgb(84,39,143)']
+                ],
+                zmin: minSales,
+                zmax: maxSales,
+                colorbar: {
+                    title: 'Sales ($)',
+                    thickness: 20
+                }
+            };
+            
+            const layout = {
+                title: 'Sales by State',
+                geo: {
+                    scope: 'usa',
+                    projection: { type: 'albers usa' },
+                    showlakes: true,
+                    lakecolor: 'rgb(255, 255, 255)',
+                    landcolor: 'rgb(217, 217, 217)',
+                    subunitwidth: 1,
+                    countrywidth: 1,
+                    subunitcolor: 'rgb(255,255,255)',
+                    countrycolor: 'rgb(255,255,255)'
+                },
+                margin: { t: 40, l: 0, r: 0, b: 0 }
+            };
+            
+            Plotly.newPlot(salesByState, [trace], layout);
+        }
+        
+        // 3. Profit by State (Fixed for US map)
+        function renderProfitByState(data) {
+            const stateProfit = {};
+            
+            data.forEach(item => {
+                const stateAbbr = item.State; // Already converted in processData
+                if (!stateProfit[stateAbbr]) {
+                    stateProfit[stateAbbr] = 0;
+                }
+                stateProfit[stateAbbr] += item.Profit;
+            });
+            
+            const states = Object.keys(stateProfit).filter(abbr => abbr.length === 2);
+            const profits = states.map(state => stateProfit[state]);
+            
+            const maxProfit = Math.max(...profits);
+            const minProfit = Math.min(...profits);
+            
+            const trace = {
+                type: 'choropleth',
+                locationmode: 'USA-states',
+                locations: states,
+                z: profits,
+                text: states.map(abbr => {
+                    const fullName = Object.entries(stateAbbreviations)
+                        .find(([name, code]) => code === abbr)?.[0];
+                    return fullName 
+                        ? `${abbr} - $${stateProfit[abbr].toLocaleString()}` 
+                        : abbr;
+                }),
+                hoverinfo: 'text+location',
+                colorscale: 'Greens',
+                zmin: minProfit,
+                zmax: maxProfit,
+                colorbar: {
+                    title: 'Profit ($)',
+                    thickness: 20
+                }
+            };
+            
+            const layout = {
+                title: 'Profit by State',
+                geo: {
+                    scope: 'usa',
+                    projection: { type: 'albers usa' },
+                    showlakes: true,
+                    lakecolor: 'rgb(255, 255, 255)',
+                    landcolor: 'rgb(217, 217, 217)'
+                },
+                margin: { t: 40, l: 0, r: 0, b: 0 }
+            };
+            
+            Plotly.newPlot(profitByState, [trace], layout);
+        }
+        
+        // [Rest of your chart rendering functions remain exactly the same]
+        // 4. Top 10 States by Sales
+        function renderTopStatesSales(data) {
+            const stateSales = {};
+            
+            data.forEach(item => {
+                const state = item.State;
+                if (!stateSales[state]) {
+                    stateSales[state] = 0;
+                }
+                stateSales[state] += item.Sales;
+            });
+            
+            const sortedStates = Object.entries(stateSales)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 10);
+            
+            const trace = {
+                x: sortedStates.map(item => item[1]),
+                y: sortedStates.map(item => item[0]),
+                type: 'bar',
+                orientation: 'h',
+                marker: {
+                    color: 'rgba(52, 152, 219, 0.7)'
+                }
+            };
+            
+            const layout = {
+                title: 'Top 10 States by Sales',
+                margin: { t: 40, l: 100, r: 20, b: 50 },
+                xaxis: { title: 'Total Sales' },
+                yaxis: { automargin: true }
+            };
+            
+            Plotly.newPlot(topStatesSales, [trace], layout);
+        }
+        
+        // 5. Top 10 States by Profit
+        function renderTopStatesProfit(data) {
+            const stateProfit = {};
+            
+            data.forEach(item => {
+                const state = item.State;
+                if (!stateProfit[state]) {
+                    stateProfit[state] = 0;
+                }
+                stateProfit[state] += item.Profit;
+            });
+            
+            const sortedStates = Object.entries(stateProfit)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 10);
+            
+            const trace = {
+                x: sortedStates.map(item => item[1]),
+                y: sortedStates.map(item => item[0]),
+                type: 'bar',
+                orientation: 'h',
+                marker: {
+                    color: 'rgba(46, 204, 113, 0.7)'
+                }
+            };
+            
+            const layout = {
+                title: 'Top 10 States by Profit',
+                margin: { t: 40, l: 100, r: 20, b: 50 },
+                xaxis: { title: 'Total Profit' },
+                yaxis: { automargin: true }
+            };
+            
+            Plotly.newPlot(topStatesProfit, [trace], layout);
+        }
+        
+        // 6. Sales and Profit by Ship Mode
+        function renderSalesProfitShipmode(data) {
+            const shipModeData = {};
+            
+            data.forEach(item => {
+                const shipMode = item['Ship Mode'];
+                if (!shipModeData[shipMode]) {
+                    shipModeData[shipMode] = {
+                        sales: 0,
+                        profit: 0,
+                        count: 0
+                    };
+                }
+                shipModeData[shipMode].sales += item.Sales;
+                shipModeData[shipMode].profit += item.Profit;
+                shipModeData[shipMode].count += 1;
+            });
+            
+            const shipModes = Object.keys(shipModeData);
+            const sales = shipModes.map(mode => shipModeData[mode].sales);
+            const profits = shipModes.map(mode => shipModeData[mode].profit);
+            const avgProfit = shipModes.map(mode => shipModeData[mode].profit / shipModeData[mode].count);
+            
+            const trace1 = {
+                x: shipModes,
+                y: sales,
+                name: 'Sales',
+                type: 'bar',
+                marker: { color: '#3498db' }
+            };
+            
+            const trace2 = {
+                x: shipModes,
+                y: profits,
+                name: 'Profit',
+                type: 'bar',
+                marker: { color: '#2ecc71' }
+            };
+            
+            const trace3 = {
+                x: shipModes,
+                y: avgProfit,
+                name: 'Avg Profit',
+                type: 'line',
+                yaxis: 'y2',
+                line: { color: '#e67e22', width: 3 }
+            };
+            
+            const layout = {
+                title: 'Sales & Profit by Ship Mode',
+                barmode: 'group',
+                margin: { t: 40, l: 50, r: 50, b: 80 },
+                xaxis: { title: 'Ship Mode' },
+                yaxis: { title: 'Amount' },
+                yaxis2: {
+                    title: 'Avg Profit',
+                    overlaying: 'y',
+                    side: 'right'
+                },
+                legend: {
+                    orientation: 'h',
+                    y: 1.1
+                }
+            };
+            
+            Plotly.newPlot(salesProfitShipmode, [trace1, trace2, trace3], layout);
+        }
+        
+        // 7. Sales and Profit by Category and Sub-Category
+        function renderCategoryAnalysis(data) {
+            const categoryData = {};
+            
+            data.forEach(item => {
+                const category = item.Category;
+                const subCategory = item['Sub-Category'];
+                
+                if (!categoryData[category]) {
+                    categoryData[category] = {
+                        sales: 0,
+                        profit: 0,
+                        subCategories: {}
+                    };
+                }
+                categoryData[category].sales += item.Sales;
+                categoryData[category].profit += item.Profit;
+                
+                if (!categoryData[category].subCategories[subCategory]) {
+                    categoryData[category].subCategories[subCategory] = {
+                        sales: 0,
+                        profit: 0
+                    };
+                }
+                categoryData[category].subCategories[subCategory].sales += item.Sales;
+                categoryData[category].subCategories[subCategory].profit += item.Profit;
+            });
+            
+            const categories = Object.keys(categoryData);
+            const subCategories = [];
+            const subCategorySales = [];
+            const subCategoryProfit = [];
+            
+            categories.forEach(category => {
+                const subs = Object.keys(categoryData[category].subCategories);
+                subs.forEach(sub => {
+                    subCategories.push(`${category} - ${sub}`);
+                    subCategorySales.push(categoryData[category].subCategories[sub].sales);
+                    subCategoryProfit.push(categoryData[category].subCategories[sub].profit);
+                });
+            });
+            
+            // Sort by sales descending
+            const combined = subCategories.map((sub, i) => ({
+                sub,
+                sales: subCategorySales[i],
+                profit: subCategoryProfit[i]
+            })).sort((a, b) => b.sales - a.sales);
+            
+            const sortedSubs = combined.map(item => item.sub);
+            const sortedSales = combined.map(item => item.sales);
+            const sortedProfit = combined.map(item => item.profit);
+            
+            const trace1 = {
+                x: sortedSubs,
+                y: sortedSales,
+                name: 'Sales',
+                type: 'bar',
+                marker: { color: '#3498db' }
+            };
+            
+            const trace2 = {
+                x: sortedSubs,
+                y: sortedProfit,
+                name: 'Profit',
+                type: 'bar',
+                marker: { color: '#2ecc71' }
+            };
+            
+            const layout = {
+                title: 'Sales & Profit by Category/Sub-Category',
+                barmode: 'group',
+                margin: { t: 40, l: 50, r: 20, b: 150 },
+                xaxis: {
+                    tickangle: -45
+                },
+                yaxis: { title: 'Amount' }
+            };
+            
+            Plotly.newPlot(categoryAnalysis, [trace1, trace2], layout);
+        }
+        
+        // 8. Discount vs. Profit Correlation
+        function renderDiscountProfitCorrelation(data) {
+            const discountGroups = {};
+            
+            data.forEach(item => {
+                const discountKey = Math.floor(item.Discount * 100 / 10) * 10; // Group by 10% intervals
+                if (!discountGroups[discountKey]) {
+                    discountGroups[discountKey] = {
+                        totalProfit: 0,
+                        count: 0
+                    };
+                }
+                discountGroups[discountKey].totalProfit += item.Profit;
+                discountGroups[discountKey].count += 1;
+            });
+            
+            const discounts = Object.keys(discountGroups).sort((a, b) => a - b);
+            const avgProfit = discounts.map(d => discountGroups[d].totalProfit / discountGroups[d].count);
+            
+            const trace = {
+                x: discounts.map(d => `${d}-${parseInt(d)+10}%`),
+                y: avgProfit,
+                mode: 'lines+markers',
+                type: 'scatter',
+                marker: {
+                    size: 10,
+                    color: '#e74c3c'
+                },
+                line: {
+                    color: '#e74c3c',
+                    width: 2
+                }
+            };
+            
+            const layout = {
+                title: 'Discount vs. Average Profit',
+                xaxis: { title: 'Discount Range' },
+                yaxis: { title: 'Average Profit' },
+                margin: { t: 40, l: 50, r: 20, b: 80 }
+            };
+            
+            Plotly.newPlot(discountProfitCorrelation, [trace], layout);
+        }
+        
+        // 9. Customer Segment Analysis
+        function renderCustomerSegment(data) {
+            const segmentData = {};
+            
+            data.forEach(item => {
+                const segment = item.Segment;
+                if (!segmentData[segment]) {
+                    segmentData[segment] = {
+                        sales: 0,
+                        profit: 0,
+                        count: 0
+                    };
+                }
+                segmentData[segment].sales += item.Sales;
+                segmentData[segment].profit += item.Profit;
+                segmentData[segment].count += 1;
+            });
+            
+            const segments = Object.keys(segmentData);
+            const sales = segments.map(seg => segmentData[seg].sales);
+            const profits = segments.map(seg => segmentData[seg].profit);
+            const avgProfit = segments.map(seg => segmentData[seg].profit / segmentData[seg].count);
+            
+            const trace1 = {
+                labels: segments,
+                values: sales,
+                type: 'pie',
+                name: 'Sales',
+                hole: 0.4,
+                domain: { row: 0, column: 0 },
+                marker: {
+                    colors: ['#3498db', '#2ecc71', '#e74c3c']
+                }
+            };
+            
+            const trace2 = {
+                labels: segments,
+                values: profits,
+                type: 'pie',
+                name: 'Profit',
+                hole: 0.4,
+                domain: { row: 0, column: 1 },
+                marker: {
+                    colors: ['#3498db', '#2ecc71', '#e74c3c']
+                }
+            };
+            
+            const trace3 = {
+                x: segments,
+                y: avgProfit,
+                type: 'bar',
+                name: 'Avg Profit',
+                marker: {
+                    color: ['#3498db', '#2ecc71', '#e74c3c']
+                }
+            };
+            
+            const fig = {
+                data: [trace1, trace2],
+                layout: {
+                    title: 'Customer Segment Analysis',
+                    grid: { rows: 1, columns: 2 },
+                    annotations: [
+                        {
+                            font: { size: 20 },
+                            showarrow: false,
+                            text: 'Sales',
+                            x: 0.2,
+                            y: 0.5
+                        },
+                        {
+                            font: { size: 20 },
+                            showarrow: false,
+                            text: 'Profit',
+                            x: 0.8,
+                            y: 0.5
+                        }
+                    ],
+                    height: 400
+                }
+            };
+            
+            Plotly.newPlot(customerSegment, fig.data, fig.layout);
+            
+            // Add avg profit bar chart below
+            const avgProfitDiv = document.createElement('div');
+            avgProfitDiv.id = 'avg-profit-chart';
+            customerSegment.appendChild(avgProfitDiv);
+            
+            const avgProfitLayout = {
+                title: 'Average Profit by Segment',
+                margin: { t: 40, l: 50, r: 20, b: 50 },
+                xaxis: { title: 'Segment' },
+                yaxis: { title: 'Average Profit' }
+            };
+            
+            Plotly.newPlot('avg-profit-chart', [trace3], avgProfitLayout);
+        }
+    </script>
+</body>
+</html>
